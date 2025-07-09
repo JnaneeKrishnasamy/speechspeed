@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Mic, MicOff, RotateCcw, TrendingUp, Clock, Volume2, Moon, Sun } from 'lucide-react'
+import { Mic, MicOff, RotateCcw, TrendingUp, Clock, Volume2, Moon, Sun, Globe } from 'lucide-react'
 
 interface SpeechResult {
   transcript: string
@@ -7,6 +7,76 @@ interface SpeechResult {
   duration: number
   wpm: number
   timestamp: Date
+  region: string
+}
+
+interface RegionSpeed {
+  name: string
+  flag: string
+  ranges: {
+    slow: number
+    normal: [number, number]
+    fast: number
+    veryFast: number
+  }
+  context: string
+}
+
+const REGIONAL_SPEEDS: Record<string, RegionSpeed> = {
+  'us': {
+    name: 'United States',
+    flag: '🇺🇸',
+    ranges: { slow: 120, normal: [150, 180], fast: 200, veryFast: 220 },
+    context: 'American English speakers typically speak at a moderate pace'
+  },
+  'uk': {
+    name: 'United Kingdom',
+    flag: '🇬🇧',
+    ranges: { slow: 110, normal: [140, 170], fast: 190, veryFast: 210 },
+    context: 'British English tends to be slightly slower and more measured'
+  },
+  'au': {
+    name: 'Australia',
+    flag: '🇦🇺',
+    ranges: { slow: 115, normal: [145, 175], fast: 195, veryFast: 215 },
+    context: 'Australian English has a relaxed, moderate speaking pace'
+  },
+  'ca': {
+    name: 'Canada',
+    flag: '🇨🇦',
+    ranges: { slow: 118, normal: [148, 178], fast: 198, veryFast: 218 },
+    context: 'Canadian English similar to US but slightly more measured'
+  },
+  'in': {
+    name: 'India',
+    flag: '🇮🇳',
+    ranges: { slow: 130, normal: [160, 190], fast: 210, veryFast: 230 },
+    context: 'Indian English speakers often speak at a faster pace'
+  },
+  'sg': {
+    name: 'Singapore',
+    flag: '🇸🇬',
+    ranges: { slow: 135, normal: [165, 195], fast: 215, veryFast: 235 },
+    context: 'Singaporean English tends to be quite fast-paced'
+  },
+  'za': {
+    name: 'South Africa',
+    flag: '🇿🇦',
+    ranges: { slow: 125, normal: [155, 185], fast: 205, veryFast: 225 },
+    context: 'South African English has a distinctive moderate to fast pace'
+  },
+  'ie': {
+    name: 'Ireland',
+    flag: '🇮🇪',
+    ranges: { slow: 115, normal: [145, 175], fast: 195, veryFast: 215 },
+    context: 'Irish English speakers tend to have a melodic, moderate pace'
+  },
+  'nz': {
+    name: 'New Zealand',
+    flag: '🇳🇿',
+    ranges: { slow: 112, normal: [142, 172], fast: 192, veryFast: 212 },
+    context: 'New Zealand English is typically calm and measured'
+  }
 }
 
 function App() {
@@ -18,6 +88,10 @@ function App() {
   const [results, setResults] = useState<SpeechResult[]>([])
   const [isSupported, setIsSupported] = useState(true)
   const [error, setError] = useState('')
+  const [selectedRegion, setSelectedRegion] = useState(() => {
+    const saved = localStorage.getItem('selectedRegion')
+    return saved || 'us'
+  })
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('darkMode')
     return saved ? JSON.parse(saved) : false
@@ -38,15 +112,25 @@ function App() {
     localStorage.setItem('darkMode', JSON.stringify(isDarkMode))
   }, [isDarkMode])
 
-  // Calculate WPM whenever transcript or duration changes
+  // Save selected region
   useEffect(() => {
-    if (isRecording && duration > 0 && transcript.trim()) {
+    localStorage.setItem('selectedRegion', selectedRegion)
+  }, [selectedRegion])
+
+  // Calculate WPM only after 30 seconds of speaking
+  useEffect(() => {
+    if (isRecording && duration >= 30 && transcript.trim()) {
       const words = transcript.trim().split(/\s+/).filter(word => word.length > 0)
       const currentWordCount = words.length
       const currentWpm = Math.round((currentWordCount / duration) * 60)
       
       setWordCount(currentWordCount)
       setWpm(currentWpm)
+    } else if (isRecording && transcript.trim()) {
+      // Update word count but not WPM until 30 seconds
+      const words = transcript.trim().split(/\s+/).filter(word => word.length > 0)
+      setWordCount(words.length)
+      setWpm(0) // Keep WPM at 0 until 30 seconds
     }
   }, [transcript, duration, isRecording])
 
@@ -167,7 +251,8 @@ function App() {
         wordCount: finalWordCount,
         duration: finalDuration,
         wpm: finalWpm,
-        timestamp: new Date()
+        timestamp: new Date(),
+        region: selectedRegion
       }
       setResults(prev => [result, ...prev].slice(0, 10)) // Keep last 10 results
     }
@@ -192,17 +277,23 @@ function App() {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const getWpmColor = (wpm: number) => {
-    if (wpm < 120) return 'text-red-500'
-    if (wpm < 160) return 'text-yellow-500'
-    if (wpm < 200) return 'text-green-500'
+  const getWpmColor = (wpm: number, region: string = selectedRegion) => {
+    if (wpm === 0) return 'text-gray-400 dark:text-gray-500'
+    
+    const ranges = REGIONAL_SPEEDS[region].ranges
+    if (wpm < ranges.slow) return 'text-red-500'
+    if (wpm >= ranges.normal[0] && wpm <= ranges.normal[1]) return 'text-green-500'
+    if (wpm < ranges.fast) return 'text-yellow-500'
     return 'text-blue-500'
   }
 
-  const getWpmLabel = (wpm: number) => {
-    if (wpm < 120) return 'Slow'
-    if (wpm < 160) return 'Normal'
-    if (wpm < 200) return 'Fast'
+  const getWpmLabel = (wpm: number, region: string = selectedRegion) => {
+    if (wpm === 0) return 'Calculating...'
+    
+    const ranges = REGIONAL_SPEEDS[region].ranges
+    if (wpm < ranges.slow) return 'Slow'
+    if (wpm >= ranges.normal[0] && wpm <= ranges.normal[1]) return 'Ideal'
+    if (wpm < ranges.fast) return 'Fast'
     return 'Very Fast'
   }
 
@@ -220,6 +311,8 @@ function App() {
     )
   }
 
+  const currentRegion = REGIONAL_SPEEDS[selectedRegion]
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 transition-colors duration-300">
       {/* Header */}
@@ -236,18 +329,36 @@ function App() {
               </div>
             </div>
             
-            {/* Dark Mode Toggle */}
-            <button
-              onClick={toggleDarkMode}
-              className="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300 group"
-              aria-label="Toggle dark mode"
-            >
-              {isDarkMode ? (
-                <Sun className="w-5 h-5 text-yellow-500 group-hover:rotate-12 transition-transform duration-300" />
-              ) : (
-                <Moon className="w-5 h-5 text-gray-600 group-hover:-rotate-12 transition-transform duration-300" />
-              )}
-            </button>
+            <div className="flex items-center gap-3">
+              {/* Region Selector */}
+              <div className="relative">
+                <select
+                  value={selectedRegion}
+                  onChange={(e) => setSelectedRegion(e.target.value)}
+                  className="appearance-none bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 pr-8 rounded-xl border-0 focus:ring-2 focus:ring-blue-500 transition-all duration-300 cursor-pointer"
+                >
+                  {Object.entries(REGIONAL_SPEEDS).map(([code, region]) => (
+                    <option key={code} value={code}>
+                      {region.flag} {region.name}
+                    </option>
+                  ))}
+                </select>
+                <Globe className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+              </div>
+
+              {/* Dark Mode Toggle */}
+              <button
+                onClick={toggleDarkMode}
+                className="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300 group"
+                aria-label="Toggle dark mode"
+              >
+                {isDarkMode ? (
+                  <Sun className="w-5 h-5 text-yellow-500 group-hover:rotate-12 transition-transform duration-300" />
+                ) : (
+                  <Moon className="w-5 h-5 text-gray-600 group-hover:-rotate-12 transition-transform duration-300" />
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -257,6 +368,22 @@ function App() {
           {/* Main Recording Area */}
           <div className="lg:col-span-2">
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 transition-colors duration-300">
+              {/* Regional Context */}
+              <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-4 border border-blue-100 dark:border-blue-800 transition-colors duration-300">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">{currentRegion.flag}</span>
+                  <h3 className="font-semibold text-gray-900 dark:text-white transition-colors duration-300">
+                    {currentRegion.name} Standards
+                  </h3>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-2 transition-colors duration-300">
+                  {currentRegion.context}
+                </p>
+                <div className="text-xs text-gray-500 dark:text-gray-400 transition-colors duration-300">
+                  Ideal range: {currentRegion.ranges.normal[0]}-{currentRegion.ranges.normal[1]} WPM
+                </div>
+              </div>
+
               {/* Stats Cards */}
               <div className="grid grid-cols-3 gap-4 mb-8">
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 text-center transition-colors duration-300">
@@ -271,13 +398,24 @@ function App() {
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 text-center transition-colors duration-300">
                   <Volume2 className="w-6 h-6 text-gray-500 dark:text-gray-400 mx-auto mb-2 transition-colors duration-300" />
-                  <div className={`text-2xl font-bold ${getWpmColor(wpm)} transition-colors duration-300`}>{wpm}</div>
+                  <div className={`text-2xl font-bold ${getWpmColor(wpm)} transition-colors duration-300`}>
+                    {duration < 30 && isRecording ? '--' : wpm}
+                  </div>
                   <div className="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-300">WPM</div>
                 </div>
               </div>
 
+              {/* 30 Second Warning */}
+              {isRecording && duration < 30 && (
+                <div className="mb-6 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4 transition-colors duration-300">
+                  <p className="text-blue-700 dark:text-blue-400 text-sm text-center transition-colors duration-300">
+                    WPM calculation will begin after 30 seconds of speaking ({Math.ceil(30 - duration)}s remaining)
+                  </p>
+                </div>
+              )}
+
               {/* WPM Indicator */}
-              {wpm > 0 && (
+              {wpm > 0 && duration >= 30 && (
                 <div className="mb-6">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors duration-300">Speaking Speed</span>
@@ -288,19 +426,19 @@ function App() {
                   <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 transition-colors duration-300">
                     <div 
                       className={`h-2 rounded-full transition-all duration-300 ${
-                        wpm < 120 ? 'bg-red-500' :
-                        wpm < 160 ? 'bg-yellow-500' :
-                        wpm < 200 ? 'bg-green-500' : 'bg-blue-500'
+                        wpm < currentRegion.ranges.slow ? 'bg-red-500' :
+                        wpm >= currentRegion.ranges.normal[0] && wpm <= currentRegion.ranges.normal[1] ? 'bg-green-500' :
+                        wpm < currentRegion.ranges.fast ? 'bg-yellow-500' : 'bg-blue-500'
                       }`}
-                      style={{ width: `${Math.min((wpm / 250) * 100, 100)}%` }}
+                      style={{ width: `${Math.min((wpm / currentRegion.ranges.veryFast) * 100, 100)}%` }}
                     />
                   </div>
                   <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1 transition-colors duration-300">
                     <span>0</span>
-                    <span>125 (Slow)</span>
-                    <span>160 (Normal)</span>
-                    <span>200 (Fast)</span>
-                    <span>250+ WPM</span>
+                    <span>{currentRegion.ranges.slow} (Slow)</span>
+                    <span>{currentRegion.ranges.normal[0]}-{currentRegion.ranges.normal[1]} (Ideal)</span>
+                    <span>{currentRegion.ranges.fast} (Fast)</span>
+                    <span>{currentRegion.ranges.veryFast}+ WPM</span>
                   </div>
                 </div>
               )}
@@ -373,9 +511,12 @@ function App() {
                   {results.map((result, index) => (
                     <div key={index} className="border border-gray-200 dark:border-gray-600 rounded-xl p-4 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-300">
                       <div className="flex items-center justify-between mb-2">
-                        <span className={`text-lg font-bold ${getWpmColor(result.wpm)} transition-colors duration-300`}>
-                          {result.wpm} WPM
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-lg font-bold ${getWpmColor(result.wpm, result.region)} transition-colors duration-300`}>
+                            {result.wpm} WPM
+                          </span>
+                          <span className="text-sm">{REGIONAL_SPEEDS[result.region]?.flag}</span>
+                        </div>
                         <span className="text-xs text-gray-500 dark:text-gray-400 transition-colors duration-300">
                           {result.timestamp.toLocaleTimeString()}
                         </span>
@@ -393,25 +534,27 @@ function App() {
               )}
             </div>
 
-            {/* Tips */}
+            {/* Regional Tips */}
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 mt-6 transition-colors duration-300">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 transition-colors duration-300">Speaking Tips</h3>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 transition-colors duration-300">
+                {currentRegion.flag} {currentRegion.name} Guidelines
+              </h3>
               <div className="space-y-3 text-sm text-gray-600 dark:text-gray-300 transition-colors duration-300">
                 <div className="flex items-start gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0" />
-                  <p><strong>Ideal Speed:</strong> 150-160 WPM for presentations</p>
+                  <div className="w-2 h-2 bg-red-500 rounded-full mt-2 flex-shrink-0" />
+                  <p><strong>Too Slow:</strong> Under {currentRegion.ranges.slow} WPM</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0" />
-                  <p><strong>Conversational:</strong> 120-150 WPM for casual talk</p>
+                  <p><strong>Ideal Range:</strong> {currentRegion.ranges.normal[0]}-{currentRegion.ranges.normal[1]} WPM</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <div className="w-2 h-2 bg-yellow-500 rounded-full mt-2 flex-shrink-0" />
-                  <p><strong>Practice:</strong> Read aloud to improve consistency</p>
+                  <p><strong>Fast:</strong> {currentRegion.ranges.normal[1] + 1}-{currentRegion.ranges.fast} WPM</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <div className="w-2 h-2 bg-purple-500 rounded-full mt-2 flex-shrink-0" />
-                  <p><strong>Clarity:</strong> Slower is better than unclear</p>
+                  <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0" />
+                  <p><strong>Very Fast:</strong> Over {currentRegion.ranges.fast} WPM</p>
                 </div>
               </div>
             </div>
