@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Mic, MicOff, RotateCcw, TrendingUp, Clock, Volume2, Moon, Sun, Globe } from 'lucide-react'
+import { Mic, MicOff, RotateCcw, TrendingUp, Clock, Volume2, Moon, Sun, Globe, Shield } from 'lucide-react'
 
 interface SpeechResult {
   transcript: string
   wordCount: number
   duration: number
   wpm: number
+  confidence: number
   timestamp: Date
   region: string
 }
@@ -85,6 +86,7 @@ function App() {
   const [wordCount, setWordCount] = useState(0)
   const [duration, setDuration] = useState(0)
   const [wpm, setWpm] = useState(0)
+  const [confidence, setConfidence] = useState(0)
   const [results, setResults] = useState<SpeechResult[]>([])
   const [isSupported, setIsSupported] = useState(true)
   const [error, setError] = useState('')
@@ -101,6 +103,7 @@ function App() {
   const startTimeRef = useRef<number>(0)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const currentTranscriptRef = useRef<string>('')
+  const confidenceScoresRef = useRef<number[]>([])
 
   // Apply dark mode to document
   useEffect(() => {
@@ -117,20 +120,27 @@ function App() {
     localStorage.setItem('selectedRegion', selectedRegion)
   }, [selectedRegion])
 
-  // Calculate WPM only after 30 seconds of speaking
+  // Calculate WPM and confidence only after 30 seconds of speaking
   useEffect(() => {
     if (isRecording && duration >= 30 && transcript.trim()) {
       const words = transcript.trim().split(/\s+/).filter(word => word.length > 0)
       const currentWordCount = words.length
       const currentWpm = Math.round((currentWordCount / duration) * 60)
       
+      // Calculate average confidence from collected scores
+      const avgConfidence = confidenceScoresRef.current.length > 0 
+        ? confidenceScoresRef.current.reduce((sum, score) => sum + score, 0) / confidenceScoresRef.current.length
+        : 0
+      
       setWordCount(currentWordCount)
       setWpm(currentWpm)
+      setConfidence(Math.round(avgConfidence * 100))
     } else if (isRecording && transcript.trim()) {
-      // Update word count but not WPM until 30 seconds
+      // Update word count but not WPM/confidence until 30 seconds
       const words = transcript.trim().split(/\s+/).filter(word => word.length > 0)
       setWordCount(words.length)
       setWpm(0) // Keep WPM at 0 until 30 seconds
+      setConfidence(0) // Keep confidence at 0 until 30 seconds
     }
   }, [transcript, duration, isRecording])
 
@@ -155,8 +165,12 @@ function App() {
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript
+        const confidenceScore = event.results[i][0].confidence || 0.8 // Fallback confidence
+        
         if (event.results[i].isFinal) {
           finalTranscript += transcript
+          // Store confidence scores for final results only
+          confidenceScoresRef.current.push(confidenceScore)
         } else {
           interimTranscript += transcript
         }
@@ -209,7 +223,9 @@ function App() {
     setWordCount(0)
     setDuration(0)
     setWpm(0)
+    setConfidence(0)
     currentTranscriptRef.current = ''
+    confidenceScoresRef.current = []
     
     startTimeRef.current = Date.now()
     setIsRecording(true)
@@ -243,6 +259,9 @@ function App() {
     const finalWordCount = finalWords.length
     const finalDuration = duration
     const finalWpm = finalDuration > 0 ? Math.round((finalWordCount / finalDuration) * 60) : 0
+    const finalConfidence = confidenceScoresRef.current.length > 0 
+      ? Math.round((confidenceScoresRef.current.reduce((sum, score) => sum + score, 0) / confidenceScoresRef.current.length) * 100)
+      : 0
 
     // Save result if there's content
     if (finalTranscript && finalWordCount > 0) {
@@ -251,6 +270,7 @@ function App() {
         wordCount: finalWordCount,
         duration: finalDuration,
         wpm: finalWpm,
+        confidence: finalConfidence,
         timestamp: new Date(),
         region: selectedRegion
       }
@@ -263,8 +283,10 @@ function App() {
     setWordCount(0)
     setDuration(0)
     setWpm(0)
+    setConfidence(0)
     setError('')
     currentTranscriptRef.current = ''
+    confidenceScoresRef.current = []
   }
 
   const toggleDarkMode = () => {
@@ -297,6 +319,22 @@ function App() {
     return 'Very Fast'
   }
 
+  const getConfidenceColor = (confidence: number) => {
+    if (confidence === 0) return 'text-gray-400 dark:text-gray-500'
+    if (confidence < 60) return 'text-red-500'
+    if (confidence < 75) return 'text-yellow-500'
+    if (confidence < 90) return 'text-green-500'
+    return 'text-emerald-500'
+  }
+
+  const getConfidenceLabel = (confidence: number) => {
+    if (confidence === 0) return 'Calculating...'
+    if (confidence < 60) return 'Low'
+    if (confidence < 75) return 'Fair'
+    if (confidence < 90) return 'Good'
+    return 'Excellent'
+  }
+
   if (!isSupported) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4 transition-colors duration-300">
@@ -325,7 +363,7 @@ function App() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-300">Speaking Speed Analyzer</h1>
-                <p className="text-gray-600 dark:text-gray-300 transition-colors duration-300">Measure and improve your speaking pace</p>
+                <p className="text-gray-600 dark:text-gray-300 transition-colors duration-300">Measure speed, confidence, and improve your speaking</p>
               </div>
             </div>
             
@@ -385,7 +423,7 @@ function App() {
               </div>
 
               {/* Stats Cards */}
-              <div className="grid grid-cols-3 gap-4 mb-8">
+              <div className="grid grid-cols-4 gap-4 mb-8">
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 text-center transition-colors duration-300">
                   <Clock className="w-6 h-6 text-gray-500 dark:text-gray-400 mx-auto mb-2 transition-colors duration-300" />
                   <div className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-300">{formatTime(duration)}</div>
@@ -403,13 +441,20 @@ function App() {
                   </div>
                   <div className="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-300">WPM</div>
                 </div>
+                <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 text-center transition-colors duration-300">
+                  <Shield className="w-6 h-6 text-gray-500 dark:text-gray-400 mx-auto mb-2 transition-colors duration-300" />
+                  <div className={`text-2xl font-bold ${getConfidenceColor(confidence)} transition-colors duration-300`}>
+                    {duration < 30 && isRecording ? '--' : `${confidence}%`}
+                  </div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-300">Confidence</div>
+                </div>
               </div>
 
               {/* 30 Second Warning */}
               {isRecording && duration < 30 && (
                 <div className="mb-6 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4 transition-colors duration-300">
                   <p className="text-blue-700 dark:text-blue-400 text-sm text-center transition-colors duration-300">
-                    WPM calculation will begin after 30 seconds of speaking ({Math.ceil(30 - duration)}s remaining)
+                    Analysis will begin after 30 seconds of speaking ({Math.ceil(30 - duration)}s remaining)
                   </p>
                 </div>
               )}
@@ -439,6 +484,35 @@ function App() {
                     <span>{currentRegion.ranges.normal[0]}-{currentRegion.ranges.normal[1]} (Ideal)</span>
                     <span>{currentRegion.ranges.fast} (Fast)</span>
                     <span>{currentRegion.ranges.veryFast}+ WPM</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Confidence Indicator */}
+              {confidence > 0 && duration >= 30 && (
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors duration-300">Voice Confidence</span>
+                    <span className={`text-sm font-medium ${getConfidenceColor(confidence)} transition-colors duration-300`}>
+                      {getConfidenceLabel(confidence)}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 transition-colors duration-300">
+                    <div 
+                      className={`h-2 rounded-full transition-all duration-300 ${
+                        confidence < 60 ? 'bg-red-500' :
+                        confidence < 75 ? 'bg-yellow-500' :
+                        confidence < 90 ? 'bg-green-500' : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${confidence}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1 transition-colors duration-300">
+                    <span>0%</span>
+                    <span>60% (Low)</span>
+                    <span>75% (Fair)</span>
+                    <span>90% (Good)</span>
+                    <span>100% (Excellent)</span>
                   </div>
                 </div>
               )}
@@ -521,8 +595,13 @@ function App() {
                           {result.timestamp.toLocaleTimeString()}
                         </span>
                       </div>
-                      <div className="text-sm text-gray-600 dark:text-gray-300 mb-2 transition-colors duration-300">
-                        {result.wordCount} words • {formatTime(result.duration)}
+                      <div className="flex items-center gap-4 mb-2">
+                        <div className="text-sm text-gray-600 dark:text-gray-300 transition-colors duration-300">
+                          {result.wordCount} words • {formatTime(result.duration)}
+                        </div>
+                        <div className={`text-sm font-medium ${getConfidenceColor(result.confidence)} transition-colors duration-300`}>
+                          {result.confidence}% confidence
+                        </div>
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 transition-colors duration-300">
                         {result.transcript.substring(0, 100)}
@@ -555,6 +634,31 @@ function App() {
                 <div className="flex items-start gap-2">
                   <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0" />
                   <p><strong>Very Fast:</strong> Over {currentRegion.ranges.fast} WPM</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Confidence Tips */}
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 mt-6 transition-colors duration-300">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 transition-colors duration-300">
+                Voice Confidence Tips
+              </h3>
+              <div className="space-y-3 text-sm text-gray-600 dark:text-gray-300 transition-colors duration-300">
+                <div className="flex items-start gap-2">
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2 flex-shrink-0" />
+                  <p><strong>90%+:</strong> Clear, confident speech</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0" />
+                  <p><strong>75-89%:</strong> Good clarity, minor hesitation</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div className="w-2 h-2 bg-yellow-500 rounded-full mt-2 flex-shrink-0" />
+                  <p><strong>60-74%:</strong> Some unclear pronunciation</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div className="w-2 h-2 bg-red-500 rounded-full mt-2 flex-shrink-0" />
+                  <p><strong>Under 60%:</strong> Improve articulation</p>
                 </div>
               </div>
             </div>
